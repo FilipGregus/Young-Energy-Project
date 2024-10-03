@@ -1,10 +1,7 @@
-from machine import Pin, I2C, sleep, Timer
+from machine import Pin, I2C, sleep, Timer, PWM
 import ssd1306
 from bme680 import *
 from time import time, ticks_diff, ticks_ms
-
-print(ticks_diff(ticks_ms(), ticks_ms()))
-
 
 #check bme & display initialization
 
@@ -13,6 +10,11 @@ bme = BME680_I2C(I2C(0, scl=Pin(22), sda=Pin(21)))
 # using default address 0x3C
 i2c = I2C(0, scl=Pin(22), sda=Pin(21))
 display = ssd1306.SSD1306_I2C(64, 48, i2c)
+
+
+red_led = PWM(Pin(27), freq=2000, duty_u16=0)
+green_led = PWM(Pin(25), freq=2000, duty_u16=0)
+blue_led = PWM(Pin(32), freq=2000, duty_u16=0)
 
 displayOn = False
 displayState = 1
@@ -84,8 +86,29 @@ def gasAlogorithm():
     if measureCount > 5:        
         iaq = calculate_iaq(1-gas, humidity, temperature)
     
+def offLed():
+    print("off")
+    global red_led, green_led, blue_led
+    red_led.duty_u16(0)
+    green_led.duty_u16(0)
+    blue_led.duty_u16(0)
+
+
+def indicateOnLed(iaq):
+    print("ind")
+    global red_led, green_led, blue_led
+    offLed()
     
-    
+    if iaq < 100:
+        green_led.duty_u16(2**14)
+    elif iaq < 200:
+        red_led.duty_u16(2**15)
+        green_led.duty_u16(2**12)
+    elif iaq < 300:
+        red_led.duty_u16(2**15)
+        green_led.duty_u16(2**10)
+    else:
+        red_led.duty_u16(2**15)          
 
 
 def move(pin):
@@ -100,12 +123,14 @@ def changeDisplayMode(t):
     global displayState, displayChanged, measureCount
     
     if displayState == 3 and measureCount < 5:
+        offLed()
         displayState = 1
         shutDownDisplay()    
     elif displayState < 4:
         displayState += 1
         displayChanged = True
     else:
+        offLed()
         displayState = 1
         shutDownDisplay()
     
@@ -134,13 +159,7 @@ def shutDownDisplay():
     displayOn = False
     timerStarted = False
     timer.deinit()
-    display.poweroff() 
-    
-
-def indicateOnLed(gas):
-    print(gas)
-    #rozdelnie na stupne
-    
+    display.poweroff()    
 
 
 pir = Pin(0, Pin.IN)
@@ -157,19 +176,17 @@ while True:
         gasAlogorithm()
         if measureCount >5:
             print(iaq)
-        
-    #indicateOnLed(bmeVals.gas)
-    #TO DO
-    
+            
     if displayOn:
+        
         if not timerStarted:
             print("a")
+            indicateOnLed(iaq)
             display.poweron()
             timer.init(callback = changeDisplayMode, period = 5000)
             timerStarted = True
             displayChanged = True
-        if displayChanged:
-            
+        if displayChanged:            
             printOnDisplay()
             displayChanged = False
         
