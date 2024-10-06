@@ -1,21 +1,43 @@
-from machine import Pin, I2C, sleep, Timer, PWM
+from machine import Pin, I2C, Timer, PWM
 import ssd1306
 from bme680 import *
-from time import time, ticks_diff, ticks_ms
+from time import time, ticks_diff, ticks_ms, sleep_ms
+import sys
 
-#check bme & display initialization
 
-bme = BME680_I2C(I2C(0, scl=Pin(22), sda=Pin(21)))
+i2c_ok = False
 
-# using default address 0x3C
 i2c = I2C(0, scl=Pin(22), sda=Pin(21))
-display = ssd1306.SSD1306_I2C(64, 48, i2c)
+try:
+    bme = BME680_I2C(i2c)
+    display = ssd1306.SSD1306_I2C(64, 48, i2c)
+    i2c_ok = True
+except:
+    i2c_ok = False
+    
 
 
 red_led = PWM(Pin(27), freq=2000, duty_u16=0)
 green_led = PWM(Pin(25), freq=2000, duty_u16=0)
 blue_led = PWM(Pin(32), freq=2000, duty_u16=0)
 
+buzzer = PWM(Pin(33))
+buzzer.deinit()
+
+def warning():
+    global red_led, buzzer    
+    buzzer.init(freq = 2000, duty_u16 = 0)
+    
+    for duty in (2**15,0,2**15,0):
+        red_led.duty_u16(duty)
+        buzzer.duty_u16(duty)
+        sleep_ms(1000)
+
+
+if not i2c_ok:
+    warning()
+    sys.exit()
+    
 displayOn = False
 displayState = 1
 displayChanged = False
@@ -46,8 +68,7 @@ def normalize_with_midpoint(value, min_val, mid_val, max_val):
     return max(-1, min(norm_value, 1))  # Orezanie do rozsahu -1 až 1
 
 
-def calculate_iaq(gas, humidity, temperature):
-    print(gas, humidity, temperature)
+def calculate_iaq(gas, humidity, temperature):    
     # Normalizácia hodnôt s optimálnym bodom (stred = 0)      
     norm_humidity = normalize_with_midpoint(humidity, 30, 45, 60)  # Optimálna vlhkosť 45%
     
@@ -87,15 +108,13 @@ def gasAlogorithm():
         iaq = calculate_iaq(1-gas, humidity, temperature)
     
 def offLed():
-    print("off")
     global red_led, green_led, blue_led
     red_led.duty_u16(0)
     green_led.duty_u16(0)
     blue_led.duty_u16(0)
 
 
-def indicateOnLed(iaq):
-    print("ind")
+def indicateOnLed(iaq):    
     global red_led, green_led, blue_led
     offLed()
     
@@ -112,7 +131,7 @@ def indicateOnLed(iaq):
 
 
 def move(pin):
-    sleep(10)
+    sleep_ms(10)
     if not pin.value(): return
     
     global displayOn
@@ -141,16 +160,20 @@ def printOnDisplay():
     
     display.fill(0)
     if displayState == 1:
-        display.text("{:.2f}".format(temperature), 0, 0, 1)
+        display.text("Teplota", 0, 0, 1)
+        display.text("{:.2f}".format(temperature)+"'C", 0, 25, 1)        
         display.show()
     elif displayState == 2:
-        display.text("{:.2f}".format(humidity)+"%", 0, 0, 1)
+        display.text("Vlchkost", 0, 0, 1)
+        display.text("{:.2f}".format(humidity)+"%", 0, 25, 1)
         display.show()    
     elif displayState == 3:
-        display.text("{:.0f}".format(pressure)+"hPa", 0, 0, 1)
+        display.text("Tlak", 0, 0, 1)
+        display.text("{:.0f}".format(pressure)+"hPa", 0, 25, 1)
         display.show()
     elif displayState == 4:
-        display.text("{}".format(gas*100)+"%", 0, 0, 1)
+        display.text("VOC", 0, 0, 1)
+        display.text("{:.2f}".format(100-(gas*100))+"%", 0, 25, 1)
         display.show()
         
 
@@ -169,19 +192,17 @@ timer = Timer(-1)
     
 startTick = ticks_ms()
 
-while True:
-    
+while True:    
     if ticks_diff(ticks_ms(), startTick) > 60000:
         startTick = ticks_ms()
-        gasAlogorithm()
-        if measureCount >5:
-            print(iaq)
+        gasAlogorithm()  
             
     if displayOn:
-        
-        if not timerStarted:
-            print("a")
-            indicateOnLed(iaq)
+        if not timerStarted:           
+            if measureCount > 5:
+                if measureCount > 15 and iaq > 400:
+                    warning()
+                indicateOnLed(iaq)
             display.poweron()
             timer.init(callback = changeDisplayMode, period = 5000)
             timerStarted = True
@@ -191,5 +212,4 @@ while True:
             displayChanged = False
         
     if not timerStarted:
-        sleep(100)
-
+        sleep_ms(100)
